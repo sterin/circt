@@ -117,6 +117,9 @@ struct LoweringOptions {
   /// Print debug info.
   bool printDebugInfo = false;
 
+  /// If true, inline memory wrapper modules in to the parent module.
+  bool inlineMemoryWrapperModules = false;
+
   /// If true, every mux expression is spilled to a wire.
   bool disallowMuxInlining = false;
 

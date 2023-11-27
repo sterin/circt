@@ -1,4 +1,4 @@
-# Verilog and SystemVerilog Generation
+#Verilog and SystemVerilog Generation
 
 [Verilog](https://en.wikipedia.org/wiki/Verilog) and
  [SystemVerilog](https://en.wikipedia.org/wiki/SystemVerilog) are critical
@@ -107,6 +107,9 @@ The current set of "style" Lowering Options is:
    declaration when possible.
  * `printDebugInfo` (default=`false`). If true, emit additional debug information
    (e.g. inner symbols) into comments.
+ * `inlineMemoryWrapperModules` (default=`false`). If true, inline memory wrapper modules. Module 
+   bounaries around memories in Vivado prevent it from merging memories and shift registers at
+   memory outputs, resulting in worse timing.
  * `disallowMuxInlining` (default=`false`). If true, every mux expression is spilled to a wire.
    This is used to avoid emitting deeply nested mux expressions to improve readability.
  * `wireSpillingHeuristic` (default=`spillNone`). This controls extra wire spilling performed
