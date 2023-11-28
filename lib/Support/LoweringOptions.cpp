@@ -95,8 +95,6 @@ void LoweringOptions::parse(StringRef text, ErrorHandlerT errorHandler) {
       printDebugInfo = true;
     } else if (option == "disallowExpressionInliningInPorts") {
       disallowExpressionInliningInPorts = true;
-    } else if (option == "inlineMemoryWrapperModules") {
-      inlineMemoryWrapperModules = true;
     } else if (option == "disallowMuxInlining") {
       disallowMuxInlining = true;
     } else if (option == "mitigateVivadoArrayIndexConstPropBug") {
@@ -162,8 +160,6 @@ std::string LoweringOptions::toString() const {
     options += "wireSpillingHeuristic=spillLargeTermsWithNamehints,";
   if (disallowExpressionInliningInPorts)
     options += "disallowExpressionInliningInPorts,";
-  if (inlineMemoryWrapperModules)
-    options += "inlineMemoryWrapperModules,";
   if (disallowMuxInlining)
     options += "disallowMuxInlining,";
   if (mitigateVivadoArrayIndexConstPropBug)

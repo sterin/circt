@@ -794,19 +794,16 @@ void HWMemSimImplPass::runOnOperation() {
   }
 
   // inline the memory modules created in the previous stage if
-  // inlineMemoryWrapperModules lowering options is enabled
-  if (!wrapperModules.empty() &&
-      LoweringOptions(topModule).inlineMemoryWrapperModules) {
+  // inlineMem option enabled
+  if (inlineMem && !wrapperModules.empty()) {
     SmallVector<InstanceOp> inlinedInstances;
     auto &symbolTable = getAnalysis<SymbolTable>();
     for (auto mod :
          llvm::make_early_inc_range(topModule.getOps<HWModuleOp>())) {
       for (auto inst : mod.getOps<InstanceOp>()) {
-        auto mem =
-            dyn_cast<HWModuleOp>(symbolTable.lookup(inst.getModuleName()));
-        if (wrapperModules.find(mem) == wrapperModules.end()) {
+        auto mem = symbolTable.lookup<HWModuleOp>(inst.getModuleName());
+        if (!wrapperModules.contains(mem))
           continue;
-        }
         PrefixingInliner interface(&getContext(), inst.getInstanceName());
         if (failed(mlir::inlineRegion(interface, &mem.getBody(), inst,
                                       inst.getOperands(), inst.getResults(),
@@ -819,12 +816,10 @@ void HWMemSimImplPass::runOnOperation() {
         inlinedInstances.push_back(inst);
       }
     }
-    for (auto inst : inlinedInstances) {
+    for (auto inst : inlinedInstances)
       inst.erase();
-    }
-    for (auto mod : wrapperModules) {
+    for (auto mod : wrapperModules)
       mod.erase();
-    }
   }
 
   if (!anythingChanged)

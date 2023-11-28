@@ -220,9 +220,9 @@ endmodule
 
 ## Workaround
 
-Compile with `firtool --lowering-options=inlineMemoryWrapperModules` to inline the content of the memory wrapper module into the parent module.
+Compile with `firtool --inline-mem` to inline the content of the memory wrapper module into the parent module.
 
-With the `inlineMemoryWrapperModules` lowering option, the memory is inside the parent module.
+With this option, the memory is emitted inside the parent module.
 
 ```Verilog
 module Foo(
