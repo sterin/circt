@@ -21,11 +21,9 @@
 #include "circt/Dialect/Seq/SeqAttributes.h"
 #include "circt/Dialect/Seq/SeqPasses.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Path.h"
-
-#include "circt/Support/LoweringOptions.h"
-#include "mlir/Transforms/InliningUtils.h"
 
 using namespace circt;
 using namespace hw;
@@ -703,12 +701,17 @@ void HWMemSimImpl::generateMemory(HWModuleOp op, FirMemory mem) {
   });
 }
 
+#include <iostream>
 namespace {
 
 struct PrefixingInliner : public mlir::InlinerInterface {
+  ImplicitLocOpBuilder &b;
+  InnerSymbolNamespace &moduleNamespace;
   StringRef prefix;
-  PrefixingInliner(MLIRContext *context, StringRef prefix)
-      : mlir::InlinerInterface(context), prefix(prefix) {}
+  PrefixingInliner(MLIRContext *context, ImplicitLocOpBuilder &b,
+                   InnerSymbolNamespace &moduleNamespace, StringRef prefix)
+      : mlir::InlinerInterface(context), b(b), moduleNamespace(moduleNamespace),
+        prefix(prefix) {}
 
   bool isLegalToInline(Region *dest, Region *src, bool wouldBeCloned,
                        IRMapping &valueMapping) const override {
@@ -724,7 +727,6 @@ struct PrefixingInliner : public mlir::InlinerInterface {
     for (auto [from, to] : llvm::zip(valuesToRepl, op->getOperands()))
       from.replaceAllUsesWith(to);
   }
-
   void processInlinedBlocks(
       iterator_range<Region::iterator> inlinedBlocks) override {
     for (Block &block : inlinedBlocks)
@@ -733,6 +735,28 @@ struct PrefixingInliner : public mlir::InlinerInterface {
             name && !name.getValue().empty()) {
           op->setAttr("name", StringAttr::get(name.getContext(),
                                               prefix + "_" + name.getValue()));
+        }
+        if (auto symOp = dyn_cast<hw::InnerSymbolOpInterface>(op)) {
+          if (auto innerName = symOp.getInnerSymAttr()) {
+            symOp.setInnerSymbolAttr(
+                hw::InnerSymAttr::get(b.getStringAttr(moduleNamespace.newName(
+                    prefix + "_" + innerName.getSymName().str()))));
+          }
+        }
+        if (auto verbatim = dyn_cast<sv::VerbatimOp>(op)) {
+          if (auto syms = verbatim.getSymbolsAttr()) {
+            SmallVector<Attribute, 4> refs;
+            for (auto sym : syms) {
+              if (auto ref = dyn_cast<InnerRefAttr>(sym)) {
+                refs.push_back(hw::InnerRefAttr::get(
+                    b.getStringAttr("Foo"),
+                    b.getStringAttr(prefix + "_" + ref.getName().str())));
+              } else {
+                refs.push_back(sym);
+              }
+            }
+            verbatim.setSymbolsAttr(b.getArrayAttr(refs));
+          }
         }
       });
   }
@@ -778,7 +802,8 @@ void HWMemSimImplPass::runOnOperation() {
       } else {
         auto newModule = builder.create<HWModuleOp>(
             oldModule.getLoc(), nameAttr, oldModule.getPortList());
-        wrapperModules.insert({newModule, false});
+        if (mem.initFilename.empty() || mem.initIsInline)
+          wrapperModules.insert({newModule, false});
         if (auto outdir = oldModule->getAttr("output_file"))
           newModule->setAttr("output_file", outdir);
         newModule.setCommentAttr(
@@ -802,6 +827,8 @@ void HWMemSimImplPass::runOnOperation() {
   if (inlineMem && !wrapperModules.empty()) {
     SmallVector<InstanceOp> inlinedInstances;
     auto &symbolTable = getAnalysis<SymbolTable>();
+    std::unique_ptr<ImplicitLocOpBuilder> b;
+    std::unique_ptr<InnerSymbolNamespace> moduleNamespace;
     for (auto mod :
          llvm::make_early_inc_range(topModule.getOps<HWModuleOp>())) {
       for (auto inst : mod.getOps<InstanceOp>()) {
@@ -814,7 +841,13 @@ void HWMemSimImplPass::runOnOperation() {
           wrapperModules[mem] = true;
           continue;
         }
-        PrefixingInliner interface(&getContext(), inst.getInstanceName());
+        if (!b)
+          b = std::make_unique<ImplicitLocOpBuilder>(mod.getLoc(),
+                                                     mod.getBody());
+        if (!moduleNamespace)
+          moduleNamespace = std::make_unique<InnerSymbolNamespace>(mod);
+        PrefixingInliner interface(&getContext(), *b, *moduleNamespace,
+                                   inst.getInstanceName());
         if (failed(mlir::inlineRegion(interface, &mem.getBody(), inst,
                                       inst.getOperands(), inst.getResults(),
                                       std::nullopt, true))) {
@@ -841,3 +874,17 @@ std::unique_ptr<Pass>
 circt::seq::createHWMemSimImplPass(const HWMemSimImplOptions &options) {
   return std::make_unique<HWMemSimImplPass>(options);
 }
+
+/************************
+
+While testing I've discovered a few more problems:
+
+* Multiple memories in the same module don't work becuase inner symbols are not prefixed.
+* Once inner symbols are prefixed, the register randomization code that relies on them fails.
+* The inner symbols are references through the symbols attribute of `sv::VerbatimOp` nodes. The references there need to be patched. 
+
+Then there's support for out-of-line memory intialization via `firrtl.annotations.LoadMemoryAnnotation`.
+
+It is all possible but it somewhat increases the complexity of what was supposed to be a rather simple transform.
+
+*/
